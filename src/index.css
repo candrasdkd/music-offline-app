@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    color-scheme: dark;
+}
+
+/* globals.css */
+@supports (-webkit-touch-callout: none) {
+
+    input,
+    select,
+    textarea,
+    button {
+        font-size: 16px;
+    }
+}
