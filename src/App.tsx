@@ -1,7 +1,7 @@
 import React from 'react';
 import InstallPrompt from './components/InstallPrompt';
 import { putTrack, getAllTracks, putBlob, getBlob, getAllCategories, putCategory, deleteCategory, deleteTracks } from './lib/db';
-import { hasFS, pickFiles, pickFolder } from './lib/fs';
+import { hasFS, pickFiles, pickFilesFallback, pickFolder } from './lib/fs';
 import type { Track, Category } from './lib/types';
 import { fmtMs } from './lib/fmt';
 
@@ -148,12 +148,24 @@ export default function App() {
   }
 
   async function handlePickFiles() {
-    const result = await pickFiles();
-    if (result) {
-      await importFiles(result);
-      return;
+    console.log('Mencoba File System API modern...');
+    // 1. Coba metode API modern (showOpenFilePicker)
+    let result = await pickFiles();
+
+    // 2. Jika gagal atau tidak didukung (null), panggil fallback
+    if (result === null) {
+      console.log('API modern gagal atau tidak didukung. Menggunakan fallback <input>...');
+      result = await pickFilesFallback();
     }
-    fileInputRef.current?.click();
+
+    // 3. Proses hasilnya jika ada (baik dari modern atau fallback)
+    if (result && result.length > 0) {
+      console.log(`Berhasil memilih ${result.length} file.`);
+      await importFiles(result); // Panggil fungsi impor Anda
+    } else {
+      // Ini terjadi jika user membatalkan dialog pemilihan file
+      console.log('Pemilihan file dibatalkan.');
+    }
   }
 
   async function handlePickFolder() {
@@ -176,7 +188,6 @@ export default function App() {
         size: file.size,
         type: file.type || 'audio/*',
         createdAt: Date.now(),
-        // ⬇️ BARIS BARU: auto masuk ke folder aktif kalau bukan "Semua"
         categoryIds: activeCat !== 'all' ? [activeCat] : [],
         storage: hasFS() && it.handle ? 'handle' : 'blob',
         handle: hasFS() && it.handle ? it.handle : undefined,
@@ -188,13 +199,11 @@ export default function App() {
       newOnes.push(base);
     }
 
-    // ⬇️ GANTI: dari append lokal → baca ulang dari DB supaya langsung segar
     const fresh = await getAllTracks();
     setTracks(fresh);
 
     alert(`Import selesai: ${newOnes.length} file`);
   }
-
 
   async function onFileInput(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files || []);
@@ -300,26 +309,27 @@ export default function App() {
   const catCount = (id: string) => tracks.filter(t => (t.categoryIds || []).includes(id)).length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 selection:bg-brand/30">
-      {/* Top banner */}
-      <div className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-black/35 border-b border-white/10">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
+    <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 text-slate-100 selection:bg-brand/30 relative">
+      {/* Top banner - Mobile Optimized */}
+      <div className="sticky top-0 z-50 backdrop-blur supports-[backdrop-filter]:bg-black/90 border-b border-white/10">
+        <div className="max-w-6xl mx-auto px-3 py-2 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-0">
             <button
-              className="md:hidden p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
+              className="p-2 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 shrink-0 md:hidden tap-target"
               onClick={() => setSidebarOpen(true)}
               aria-label="Buka menu"
             >
               ☰
             </button>
-            <div className="h-9 w-9 rounded-xl bg-brand/90 text-slate-900 grid place-items-center shadow">🎵</div>
-            <div>
-              <div className="font-bold leading-4">Musekita</div>
+            <div className="h-8 w-8 rounded-xl bg-brand/90 text-slate-900 grid place-items-center shadow text-sm shrink-0">🎵</div>
+            <div className="min-w-0">
+              <div className="font-bold text-sm leading-4 truncate">Musekita</div>
               <div className={`text-[10px] inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${online ? 'bg-emerald-500/10 text-emerald-300 border-emerald-400/20' : 'bg-rose-500/10 text-rose-300 border-rose-400/20'
                 }`}>{online ? 'Online' : 'Offline'}</div>
             </div>
           </div>
 
+          {/* Desktop controls - hidden on mobile */}
           <div className="hidden md:flex items-center gap-2">
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 opacity-60">🔎</span>
@@ -344,11 +354,11 @@ export default function App() {
             <InstallPrompt />
           </div>
 
-          <div className="flex items-center gap-2">
-            <button onClick={handlePickFiles} className="px-3 py-2 rounded-xl bg-brand text-slate-900 font-semibold shadow-sm hover:opacity-95 transition">
-              Import File
+          <div className="flex items-center gap-1 shrink-0">
+            <button onClick={handlePickFiles} className="px-3 py-2 rounded-xl bg-brand text-slate-900 font-semibold text-sm shadow-sm hover:opacity-95 transition tap-target">
+              Import
             </button>
-            <button onClick={handlePickFolder} className="px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition">
+            <button onClick={handlePickFolder} className="hidden md:flex px-3 py-2 rounded-xl bg-white/10 border border-white/10 hover:bg-white/15 transition">
               Import Folder
             </button>
 
@@ -365,21 +375,21 @@ export default function App() {
           </div>
         </div>
 
-        {/* Mobile search + quick controls */}
-        <div className="md:hidden max-w-6xl mx-auto px-4 pb-3 flex items-center gap-2">
+        {/* Mobile search */}
+        <div className="md:hidden px-3 pb-2 flex items-center gap-2">
           <div className="relative flex-1">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 opacity-60">🔎</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 opacity-60 text-sm">🔎</span>
             <input
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Cari judul lagu…"
-              className="w-full pl-9 pr-3 py-2 rounded-xl bg-white/5 outline-none border border-white/10 focus:border-white/20"
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-white/5 outline-none border border-white/10 focus:border-white/20 text-sm"
               aria-label="Cari judul"
             />
           </div>
           <button
             onClick={() => setView(v => v === 'grid' ? 'list' : 'grid')}
-            className="px-3 py-2 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15"
+            className="p-2 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 shrink-0 tap-target"
             title="Toggle tampilan"
           >
             {view === 'grid' ? '≣' : '▦'}
@@ -387,25 +397,25 @@ export default function App() {
           <InstallPrompt />
         </div>
 
-        {/* Kategori untuk mobile (pills) */}
-        <div className="md:hidden px-4 pb-3 overflow-x-auto no-scrollbar">
-          <div className="flex items-center gap-2">
+        {/* Kategori untuk mobile (horizontal scroll) */}
+        <div className="md:hidden px-3 pb-2 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1 min-w-max">
             <button
               onClick={() => setActiveCat('all')}
-              className={`px-3 py-1.5 rounded-full border text-sm whitespace-nowrap ${activeCat === 'all' ? 'bg-white/15 border-white/25' : 'bg-white/5 border-white/10'
+              className={`px-2 py-1 rounded-full border text-xs whitespace-nowrap tap-target ${activeCat === 'all' ? 'bg-white/15 border-white/25' : 'bg-white/5 border-white/10'
                 }`}>Semua</button>
             {cats.map(c => (
               <button
                 key={c.id}
                 onClick={() => setActiveCat(c.id)}
-                className={`px-3 py-1.5 rounded-full border text-sm whitespace-nowrap ${activeCat === c.id ? 'bg-white/15 border-white/25' : 'bg-white/5 border-white/10'
+                className={`px-2 py-1 rounded-full border text-xs whitespace-nowrap tap-target ${activeCat === c.id ? 'bg-white/15 border-white/25' : 'bg-white/5 border-white/10'
                   }`}
                 title={c.name}
               >
                 {c.name} <span className="opacity-60">({catCount(c.id)})</span>
               </button>
             ))}
-            <button onClick={createCategory} className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm whitespace-nowrap">+ Folder</button>
+            <button onClick={createCategory} className="px-2 py-1 rounded-full bg-white/5 border border-white/10 text-xs whitespace-nowrap tap-target">+</button>
           </div>
         </div>
       </div>
@@ -464,13 +474,13 @@ export default function App() {
                   <div className="h-8 w-8 rounded-xl bg-brand/80 text-slate-900 grid place-items-center">🎵</div>
                   <h2 className="font-semibold">Musekita</h2>
                 </div>
-                <button onClick={() => setSidebarOpen(false)} className="px-2 py-1 rounded-lg bg-white/10 border border-white/10">✕</button>
+                <button onClick={() => setSidebarOpen(false)} className="px-2 py-1 rounded-lg bg-white/10 border border-white/10 tap-target">✕</button>
               </div>
               <div className="text-xs uppercase tracking-wider text-white/50 mb-1.5">Folder</div>
               <nav className="space-y-1.5">
                 <button
                   onClick={() => { setActiveCat('all'); setSidebarOpen(false); }}
-                  className={`w-full text-left px-3 py-2 rounded-xl transition border hover:border-white/10 hover:bg-white/5 ${activeCat === 'all' ? 'bg-white/10 border-white/10' : 'border-transparent'
+                  className={`w-full text-left px-3 py-2 rounded-xl transition border hover:border-white/10 hover:bg-white/5 tap-target ${activeCat === 'all' ? 'bg-white/10 border-white/10' : 'border-transparent'
                     }`}
                 >
                   Semua
@@ -479,7 +489,7 @@ export default function App() {
                   <div key={cat.id} className="flex items-center gap-2 group">
                     <button
                       onClick={() => { setActiveCat(cat.id); setSidebarOpen(false); }}
-                      className={`flex-1 text-left px-3 py-2 rounded-xl transition border hover:border-white/10 hover:bg-white/5 ${activeCat === cat.id ? 'bg-white/10 border-white/10' : 'border-transparent'
+                      className={`flex-1 text-left px-3 py-2 rounded-xl transition border hover:border-white/10 hover:bg-white/5 tap-target ${activeCat === cat.id ? 'bg-white/10 border-white/10' : 'border-transparent'
                         }`}
                       title={cat.name}
                     >
@@ -500,7 +510,7 @@ export default function App() {
                 ))}
               </nav>
               <div className="mt-4">
-                <button onClick={createCategory} className="w-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 rounded-xl transition">
+                <button onClick={createCategory} className="w-full bg-white/10 hover:bg-white/15 border border-white/10 px-3 py-2 rounded-xl transition tap-target">
                   + Folder/Kategori
                 </button>
               </div>
@@ -508,123 +518,112 @@ export default function App() {
           </div>
         )}
 
-        {/* Main */}
-        <main className="flex-1 min-h-[calc(100vh-140px)]">
-          {/* Selection toolbar */}
+        {/* Main Content - Mobile Optimized */}
+        <main className={`flex-1 min-h-[calc(100vh-140px)] ${selection.size > 0 ? 'pb-64' : 'pb-36'}`}>
+          {/* Selection toolbar - Mobile Optimized */}
           {selection.size > 0 && (
-            <div className="md:sticky md:top-[64px] fixed inset-x-0 bottom-[76px] z-40
-                  bg-black/60 backdrop-blur md:border-b border-t border-white/10 md:bottom-auto">
-              {/* 2 kolom: kiri scrollable, kanan tombol hapus fix */}
-              <div className="max-w-6xl mx-auto px-4 py-2 grid grid-cols-[1fr_auto] items-center gap-2">
-                {/* Kiri: strip aksi, bisa di-scroll horizontal */}
-                <div className="min-w-0 flex items-center gap-2 overflow-x-auto whitespace-nowrap no-scrollbar">
+            <div className="fixed inset-x-0 bottom-36 z-50 bg-black/90 backdrop-blur border-t border-white/10">
+              <div className="px-3 py-2">
+                <div className="flex items-center justify-between gap-2 mb-2">
                   <span className="text-sm opacity-80 shrink-0">Terpilih: <b>{selection.size}</b></span>
                   <button
                     onClick={toggleSelectAllFiltered}
-                    className="px-2.5 py-1.5 rounded-full bg-white/10 border border-white/10 text-sm shrink-0"
+                    className="px-2 py-1 rounded-full bg-white/10 border border-white/10 text-xs shrink-0 tap-target"
                   >
-                    {isAllSelected ? `Batal pilih (${selectedInFiltered})` : `Pilih semua (${filtered.length})`}
+                    {isAllSelected ? `Batal semua` : `Pilih semua`}
                   </button>
-                  <div className="h-4 w-px bg-white/15 mx-1" />
-                  <span className="text-sm opacity-80 shrink-0">Tambah ke folder:</span>
-                  <div className="flex items-center gap-2">
-                    {cats.map(c => (
-                      <button
-                        key={c.id}
-                        onClick={() => addToCategory(c.id)}
-                        className="px-2.5 py-1.5 rounded-full bg-white/7 border border-white/10 hover:bg-white/12 text-sm shrink-0"
-                      >
-                        {c.name}
-                      </button>
-                    ))}
-                    {activeCat !== 'all' && (
-                      <button
-                        onClick={() => removeFromCategory(activeCat)}
-                        className="px-2.5 py-1.5 rounded-full bg-white/7 border border-white/10 hover:bg-white/12 text-sm shrink-0"
-                      >
-                        Lepas dari folder aktif
-                      </button>
-                    )}
-                    <button onClick={createCategory} className="px-2.5 py-1.5 rounded-full bg-white/7 border border-white/10 hover:bg-white/12 text-sm shrink-0">
-                      + Folder baru
-                    </button>
-                  </div>
-                  <div className="justify-self-end shrink-0">
+                  <button
+                    onClick={removeSelected}
+                    className="px-2 py-1 rounded-full border text-xs transition whitespace-nowrap bg-rose-500/10 border-rose-400/20 hover:bg-rose-500/15 shrink-0 tap-target"
+                  >
+                    Hapus
+                  </button>
+                </div>
+
+                {/* Aksi folder - horizontal scroll */}
+                <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+                  <span className="text-xs opacity-80 shrink-0">Folder:</span>
+                  {cats.map(c => (
                     <button
-                      onClick={removeSelected}
-                      className="px-3 py-2 rounded-full border transition whitespace-nowrap bg-rose-500/10 border-rose-400/20 hover:bg-rose-500/15"
-                      title="Hapus track terpilih"
+                      key={c.id}
+                      onClick={() => addToCategory(c.id)}
+                      className="px-2 py-1 rounded-full bg-white/7 border border-white/10 hover:bg-white/12 text-xs shrink-0 tap-target"
                     >
-                      Hapus ({selection.size})
+                      {c.name}
                     </button>
-                  </div>
+                  ))}
+                  {activeCat !== 'all' && (
+                    <button
+                      onClick={() => removeFromCategory(activeCat)}
+                      className="px-2 py-1 rounded-full bg-white/7 border border-white/10 hover:bg-white/12 text-xs shrink-0 tap-target"
+                    >
+                      Lepas
+                    </button>
+                  )}
+                  <button onClick={createCategory} className="px-2 py-1 rounded-full bg-white/7 border border-white/10 hover:bg-white/12 text-xs shrink-0 tap-target">
+                    + Baru
+                  </button>
                 </div>
               </div>
             </div>
           )}
 
           {/* Content */}
-          <div className="max-w-6xl mx-auto px-4 py-6">
-            {/* Header row (stats & view toggle for desktop already above) */}
-            <div className="mb-3 text-sm opacity-70">
-              {filtered.length} track {activeCat !== 'all' && <>• Folder <span className="opacity-90">{cats.find(c => c.id === activeCat)?.name}</span></>}
-              {query && <> • Pencarian: “{query}”</>}
+          <div className="px-3 py-4">
+            {/* Header stats */}
+            <div className="mb-3 text-xs opacity-70">
+              {filtered.length} track {activeCat !== 'all' && <>• {cats.find(c => c.id === activeCat)?.name}</>}
+              {query && <> • "{query}"</>}
             </div>
 
             {filtered.length === 0 ? (
-              <div className="border border-dashed border-white/10 rounded-2xl p-10 text-center bg-white/5">
-                <div className="text-3xl mb-2">🗂️</div>
-                <p className="text-sm opacity-80">Belum ada track untuk filter/kata kunci ini.</p>
-                <p className="text-sm opacity-60">Coba hapus pencarian, pilih folder lain, atau import file/folder.</p>
+              <div className="border border-dashed border-white/10 rounded-xl p-6 text-center bg-white/5">
+                <div className="text-2xl mb-2">🗂️</div>
+                <p className="text-xs opacity-80">Belum ada track untuk filter ini.</p>
               </div>
             ) : view === 'grid' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                 {filtered.map(t => {
                   const isActive = currentId === t.id;
                   return (
                     <div
                       key={t.id}
-                      className={`p-3 rounded-2xl border bg-white/5 hover:bg-white/7 transition group relative
-                        ${isActive ? 'border-brand/50 ring-2 ring-brand/60' : 'border-white/10'}`}
+                      className={`p-3 rounded-xl border bg-white/5 hover:bg-white/7 transition ${isActive ? 'border-brand/50 ring-1 ring-brand/60' : 'border-white/10'}`}
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
-                        <div className="flex items-start gap-3 min-w-0">
-                          <div className={`h-12 w-12 rounded-xl grid place-items-center text-xl 
-                            ${isActive ? 'bg-brand/20 text-brand-foreground' : 'bg-gradient-to-br from-white/10 to-white/5'}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className={`h-10 w-10 rounded-lg grid place-items-center text-lg ${isActive ? 'bg-brand/20 text-brand-foreground' : 'bg-gradient-to-br from-white/10 to-white/5'}`}>
                             🎧
                           </div>
-                          <div className="min-w-0">
-                            <div className="font-semibold truncate">{t.name}</div>
-                            <div className="text-xs opacity-70">{(t.size / 1024 / 1024).toFixed(2)} MB</div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-sm truncate">{t.name}</div>
+                            <div className="text-xs opacity-70 mt-1">{(t.size / 1024 / 1024).toFixed(1)} MB</div>
                           </div>
                         </div>
-                        <label className="inline-flex items-center gap-2 text-sm md:text-xs opacity-80 hover:opacity-100 cursor-pointer self-start sm:self-auto">
+                        <label className="inline-flex items-center gap-1 text-xs opacity-80 hover:opacity-100 cursor-pointer shrink-0 mt-1 tap-target">
                           <input
                             type="checkbox"
                             checked={selection.has(t.id)}
                             onChange={() => toggleSelect(t.id)}
-                            className="accent-brand"
-                            aria-label={`Pilih ${t.name}`}
+                            className="accent-brand h-4 w-4"
                           />
-                          Pilih
                         </label>
                       </div>
 
                       <div className="mt-3 flex items-center gap-2">
                         <button
                           onClick={() => void play(t.id)}
-                          className={`px-3 py-1.5 rounded-lg border transition ${isActive ? 'bg-brand text-slate-900 border-transparent' : 'bg-white/10 border-white/10 hover:bg-white/15'
-                            }`}
+                          className={`px-3 py-1.5 rounded-lg border transition text-sm tap-target ${isActive ? 'bg-brand text-slate-900 border-transparent' : 'bg-white/10 border-white/10 hover:bg-white/15'}`}
                         >
                           {isActive ? (playing ? 'Mainkan ulang' : 'Lanjutkan') : 'Play'}
                         </button>
                         {isActive && playing && (
-                          <button onClick={pause} className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition">
+                          <button onClick={pause} className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm tap-target">
                             Pause
                           </button>
                         )}
                         {isActive && !playing && (
-                          <button onClick={resume} className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition">
+                          <button onClick={resume} className="px-3 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition text-sm tap-target">
                             Resume
                           </button>
                         )}
@@ -634,38 +633,30 @@ export default function App() {
                 })}
               </div>
             ) : (
-              <ul className="divide-y divide-white/10 rounded-2xl border border-white/10 overflow-hidden">
+              <ul className="divide-y divide-white/10 rounded-xl border border-white/10 overflow-hidden">
                 {filtered.map(t => {
                   const isActive = currentId === t.id;
                   return (
-                    <li key={t.id} className={`grid grid-cols-[auto_1fr_auto] items-center gap-3 px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] ${isActive ? 'ring-1 ring-brand/60' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={selection.has(t.id)}
-                        onChange={() => toggleSelect(t.id)}
-                        className="accent-brand h-5 w-5 md:h-4 md:w-4"
-                        aria-label={`Pilih ${t.name}`}
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className={`inline-grid h-7 w-7 place-items-center rounded-md ${isActive ? 'bg-brand/30' : 'bg-white/10'}`}>🎧</span>
-                          <span className="truncate">{t.name}</span>
+                    <li key={t.id} className={`px-3 py-3 bg-white/[0.03] hover:bg-white/[0.06] ${isActive ? 'ring-1 ring-brand/60' : ''}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={selection.has(t.id)}
+                            onChange={() => toggleSelect(t.id)}
+                            className="accent-brand h-5 w-5 shrink-0 tap-target"
+                          />
+                          <div className={`h-8 w-8 rounded-md grid place-items-center text-sm ${isActive ? 'bg-brand/20' : 'bg-white/10'}`}>
+                            🎧
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-sm truncate">{t.name}</div>
+                            <div className="text-xs opacity-60">{(t.size / 1024 / 1024).toFixed(1)} MB</div>
+                          </div>
                         </div>
-                        <div className="text-[11px] opacity-60 pl-9">{(t.size / 1024 / 1024).toFixed(2)} MB</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isActive && (
-                          <>
-                            {playing ? (
-                              <button onClick={pause} className="px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15">Pause</button>
-                            ) : (
-                              <button onClick={resume} className="px-2.5 py-1.5 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15">Resume</button>
-                            )}
-                          </>
-                        )}
                         <button
                           onClick={() => void play(t.id)}
-                          className={`px-2.5 py-1.5 rounded-lg border ${isActive ? 'bg-brand text-slate-900 border-transparent' : 'bg-white/10 border-white/10 hover:bg-white/15'}`}
+                          className={`px-2.5 py-1.5 rounded-lg border text-sm tap-target ${isActive ? 'bg-brand text-slate-900 border-transparent' : 'bg-white/10 border-white/10 hover:bg-white/15'}`}
                         >
                           {isActive ? 'Mainkan' : 'Play'}
                         </button>
@@ -676,47 +667,51 @@ export default function App() {
               </ul>
             )}
           </div>
-          {selection.size > 0 && <div className="h-[84px] md:hidden" />}
-          {/* Player bar */}
-          <audio ref={audioRef} onTimeUpdate={onTime} onEnded={next} onLoadedMetadata={onTime} className="hidden" />
-          <div className="sticky bottom-0 border-t border-white/10 bg-black/60 backdrop-blur px-4 py-3">
-            <div className="max-w-6xl mx-auto flex items-center gap-3">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="h-10 w-10 rounded-lg bg-white/10 grid place-items-center">🎵</div>
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm truncate opacity-90">{current?.name || 'Tidak ada lagu yang diputar'}</div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] opacity-60 w-12 tabular-nums">{fmtMs(progress)}</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={duration || 0}
-                      value={progress}
-                      onChange={e => {
-                        const v = Number(e.target.value);
-                        if (audioRef.current) { audioRef.current.currentTime = v / 1000; }
-                        setProgress(v);
-                      }}
-                      className="w-full accent-brand"
-                      aria-label="Seek"
-                    />
-                    <span className="text-[11px] opacity-60 w-12 text-right tabular-nums">{fmtMs(duration)}</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 md:gap-2 shrink-0">
-                <button onClick={prev} className="px-2 py-1.5 md:px-3 md:py-2 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition" aria-label="Sebelumnya">⏮</button>
-                {playing ? (
-                  <button onClick={pause} className="px-2 py-1.5 md:px-3 md:py-2 rounded-lg bg-brand text-slate-900 font-semibold shadow-sm" aria-label="Pause">⏸</button>
-                ) : (
-                  <button onClick={resume} className="px-2 py-1.5 md:px-3 md:py-2 rounded-lg bg-brand text-slate-900 font-semibold shadow-sm" aria-label="Play">▶️</button>
-                )}
-                <button onClick={next} className="px-2 py-1.5 md:px-3 md:py-2 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition" aria-label="Berikutnya">⏭</button>
-              </div>
+        </main>
+      </div>
+
+      {/* Player bar - Mobile Optimized */}
+      <audio ref={audioRef} onTimeUpdate={onTime} onEnded={next} onLoadedMetadata={onTime} className="hidden" />
+      <div className="fixed bottom-0 left-0 right-0 border-t border-white/10 bg-black/95 backdrop-blur px-3 py-2 z-40">
+        <div className="max-w-6xl mx-auto">
+          {/* Track info */}
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-8 w-8 rounded-lg bg-white/10 grid place-items-center text-sm shrink-0">🎵</div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm truncate opacity-90">{current?.name || 'Tidak ada lagu yang diputar'}</div>
             </div>
           </div>
 
-        </main>
+          {/* Progress bar */}
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-[10px] opacity-60 w-8 tabular-nums">{fmtMs(progress)}</span>
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              value={progress}
+              onChange={e => {
+                const v = Number(e.target.value);
+                if (audioRef.current) { audioRef.current.currentTime = v / 1000; }
+                setProgress(v);
+              }}
+              className="flex-1 accent-brand tap-target-range"
+              aria-label="Seek"
+            />
+            <span className="text-[10px] opacity-60 w-8 text-right tabular-nums">{fmtMs(duration)}</span>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center justify-center gap-4">
+            <button onClick={prev} className="p-2 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition tap-target" aria-label="Sebelumnya">⏮</button>
+            {playing ? (
+              <button onClick={pause} className="p-3 rounded-lg bg-brand text-slate-900 font-semibold shadow-sm tap-target" aria-label="Pause">⏸</button>
+            ) : (
+              <button onClick={resume} className="p-3 rounded-lg bg-brand text-slate-900 font-semibold shadow-sm tap-target" aria-label="Play">▶️</button>
+            )}
+            <button onClick={next} className="p-2 rounded-lg bg-white/10 border border-white/10 hover:bg-white/15 transition tap-target" aria-label="Berikutnya">⏭</button>
+          </div>
+        </div>
       </div>
     </div>
   );

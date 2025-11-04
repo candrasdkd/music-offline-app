@@ -6,13 +6,43 @@
     color-scheme: dark;
 }
 
-/* globals.css */
-@supports (-webkit-touch-callout: none) {
+.no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
 
-    input,
-    select,
-    textarea,
+.no-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+/* Touch-friendly tap targets untuk mobile */
+@layer components {
+
+    /* Terapkan kelas .tap-target ini pada elemen-elemen 
+      di mobile yang perlu target sentuh besar (min 44x44px).
+      Kita gunakan 'max-md:' agar sesuai dengan breakpoint Tailwind.
+    */
+    .tap-target {
+        @apply max-md:min-h-[44px] max-md:min-w-[44px];
+    }
+
+    /* Versi ini khusus untuk input range agar lebih mudah digeser 
+      di mobile tanpa mengubah lebarnya.
+    */
+    .tap-target-range {
+        @apply max-md:min-h-[44px];
+    }
+}
+
+
+/* Optimasi untuk layar sangat kecil */
+@media (max-width: 360px) {
+    .text-xs {
+        font-size: 0.7rem;
+    }
+
     button {
-        font-size: 16px;
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
     }
 }
